@@ -96,3 +96,76 @@
         accumulated-rewards: uint
     }
 )
+
+(define-map TierLevels
+    uint
+    {
+        minimum-stake: uint,
+        reward-multiplier: uint,
+        features-enabled: (list 10 bool)
+    }
+)
+
+;; PRIVATE FUNCTIONS
+
+;; Determines user tier based on total staked amount
+(define-private (get-tier-info (stake-amount uint))
+    (if (>= stake-amount u10000000)
+        {tier-level: u3, reward-multiplier: u200}    ;; Diamond tier: 10M+ STX
+        (if (>= stake-amount u5000000)
+            {tier-level: u2, reward-multiplier: u150} ;; Gold tier: 5M+ STX
+            {tier-level: u1, reward-multiplier: u100} ;; Silver tier: 1M+ STX
+        )
+    )
+)
+
+;; Calculates time-lock bonus multiplier for staking rewards
+(define-private (calculate-lock-multiplier (lock-period uint))
+    (if (>= lock-period u8640)      ;; 2 months lock period
+        u150                        ;; 1.5x multiplier bonus
+        (if (>= lock-period u4320)  ;; 1 month lock period
+            u125                    ;; 1.25x multiplier bonus
+            u100                    ;; No lock, base multiplier
+        )
+    )
+)
+
+;; Computes staking rewards based on user position and block progression
+(define-private (calculate-rewards (user principal) (blocks uint))
+    (let
+        (
+            (staking-position (unwrap! (map-get? StakingPositions user) u0))
+            (user-position (unwrap! (map-get? UserPositions user) u0))
+            (stake-amount (get amount staking-position))
+            (base-rate (var-get base-reward-rate))
+            (multiplier (get rewards-multiplier user-position))
+        )
+        ;; Formula: (stake * rate * multiplier * blocks) / normalization_factor
+        (/ (* (* (* stake-amount base-rate) multiplier) blocks) u14400000)
+    )
+)
+
+;; Validates proposal description meets platform standards
+(define-private (is-valid-description (desc (string-utf8 256)))
+    (and 
+        (>= (len desc) u10)    ;; Minimum 10 characters
+        (<= (len desc) u256)   ;; Maximum 256 characters
+    )
+)
+
+;; Ensures lock period matches predefined options
+(define-private (is-valid-lock-period (lock-period uint))
+    (or 
+        (is-eq lock-period u0)      ;; No lock period
+        (is-eq lock-period u4320)   ;; 1 month (30 days * 144 blocks/day)
+        (is-eq lock-period u8640)   ;; 2 months (60 days * 144 blocks/day)
+    )
+)
+
+;; Validates voting period duration for governance proposals
+(define-private (is-valid-voting-period (period uint))
+    (and 
+        (>= period u100)       ;; Minimum ~16 hours
+        (<= period u2880)      ;; Maximum ~20 days
+    )
+)
